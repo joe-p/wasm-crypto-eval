@@ -131,6 +131,21 @@ pub fn wasm_runtime_register_natives(
     unsafe { wamr_c::wasm_runtime_register_natives(module_name, natives, n_native_symbols) }
 }
 
+pub fn wasm_runtime_get_user_data(
+    exec_env: *mut wamr_c::WASMExecEnv,
+) -> *mut ::std::os::raw::c_void {
+    unsafe { wamr_c::wasm_runtime_get_user_data(exec_env) }
+}
+
+pub fn wasm_runtime_set_user_data(
+    exec_env: *mut wamr_c::WASMExecEnv,
+    user_data: *mut ::std::os::raw::c_void,
+) {
+    unsafe {
+        wamr_c::wasm_runtime_set_user_data(exec_env, user_data);
+    }
+}
+
 pub fn wasm_val_t_get_i64(v: &wamr_c::wasm_val_t) -> i64 {
     unsafe { v.of.i64_ }
 }

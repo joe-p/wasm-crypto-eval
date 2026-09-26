@@ -1,0 +1,11 @@
+[package]
+name = "wasm-crypto-eval"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sha2 = "0.10"
+wamr_runtime = { version = "0.1.0", path = "../wamr_runtime" }
+
+[dev-dependencies]
+wat = "1.0"

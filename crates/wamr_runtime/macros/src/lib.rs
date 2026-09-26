@@ -31,6 +31,13 @@ use syn::{parse_macro_input, spanned::Spanned, FnArg, ItemFn, ReturnType, Type};
 /// - `&[u8]` and `&mut [u8]` (encoded as WAMR `*~`, i.e. a bounds-checked
 ///   pointer plus length)
 ///
+/// A parameter of type `Option<&T>` is treated as host user data rather than a
+/// wasm argument: it is omitted from the WAMR signature and receives the value
+/// installed with [`Program::new`] (as `Some(&T)`), or `None` if no matching
+/// user data is present.
+///
+/// [`Program::new`]: wamr_runtime::wamr_program::Program::new
+///
 /// [`WamrHostFunction`]: wamr_runtime::runtime::WamrHostFunction
 #[proc_macro_attribute]
 pub fn wamr_host_function(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -50,9 +57,50 @@ enum ArgKind {
     Bytes {
         mutable: bool,
     },
+    UserData {
+        inner: Type,
+    },
+}
+
+/// Returns the `T` in an `Option<T>` path type, if the type is one.
+fn option_inner(ty: &Type) -> Option<&Type> {
+    let Type::Path(path) = ty else {
+        return None;
+    };
+    let segment = path.path.segments.last()?;
+    if segment.ident != "Option" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    if args.args.len() != 1 {
+        return None;
+    }
+    match &args.args[0] {
+        syn::GenericArgument::Type(inner) => Some(inner),
+        _ => None,
+    }
 }
 
 fn classify(ty: &Type) -> syn::Result<ArgKind> {
+    if let Some(inner) = option_inner(ty) {
+        return match inner {
+            Type::Reference(reference)
+                if reference.mutability.is_none()
+                    && !matches!(&*reference.elem, Type::Slice(_)) =>
+            {
+                Ok(ArgKind::UserData {
+                    inner: (*reference.elem).clone(),
+                })
+            }
+            _ => Err(syn::Error::new_spanned(
+                ty,
+                "unsupported `Option<..>` parameter; expected `Option<&T>` for host user data",
+            )),
+        };
+    }
+
     match ty {
         Type::Reference(reference) => {
             if let Type::Slice(slice) = &*reference.elem {
@@ -139,6 +187,7 @@ fn expand(func: ItemFn) -> syn::Result<TokenStream2> {
     let mut call_args = Vec::new();
     let mut wamr_types = Vec::new();
     let mut signature = String::new();
+    let mut ctx_bindings = Vec::new();
 
     for (index, input) in func.sig.inputs.iter().enumerate() {
         let FnArg::Typed(arg) = input else {
@@ -201,6 +250,14 @@ fn expand(func: ItemFn) -> syn::Result<TokenStream2> {
                 };
                 call_args.push(value);
             }
+            ArgKind::UserData { inner } => {
+                let ident = format_ident!("__ctx{}", index);
+                ctx_bindings.push(quote! {
+                    let #ident =
+                        ::wamr_runtime::runtime::user_data::<#inner>(__exec_env);
+                });
+                call_args.push(quote!(#ident.as_ref()));
+            }
         }
     }
 
@@ -213,6 +270,12 @@ fn expand(func: ItemFn) -> syn::Result<TokenStream2> {
                 return Err(syn::Error::new_spanned(
                     ty,
                     "byte slices cannot be returned from a WAMR host function",
+                ));
+            }
+            ArgKind::UserData { .. } => {
+                return Err(syn::Error::new_spanned(
+                    ty,
+                    "host user data cannot be returned from a WAMR host function",
                 ));
             }
         },
@@ -242,11 +305,12 @@ fn expand(func: ItemFn) -> syn::Result<TokenStream2> {
         #func
 
         #[doc(hidden)]
-        #[allow(non_snake_case, dead_code)]
+        #[allow(non_snake_case, dead_code, unused_variables)]
         extern "C" fn #trampoline(
-            _exec_env: *mut ::core::ffi::c_void
+            __exec_env: *mut ::core::ffi::c_void
             #(, #trampoline_params)*
         ) #trampoline_ret {
+            #(#ctx_bindings)*
             #fn_name(#(#call_args),*)
         }
 

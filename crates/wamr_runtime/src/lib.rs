@@ -38,7 +38,8 @@ mod tests {
             instruction_count_limit: 100_000,
         };
 
-        let program = Program::new(&mut program_bytes, &mut config).expect("load module");
+        let program =
+            Program::new(&mut program_bytes, &mut config, Box::new(())).expect("load module");
         assert_eq!(program.call().expect("call program"), 1337);
     }
 
@@ -82,9 +83,17 @@ mod tests {
         #[wamr_host_function]
         fn noop() {}
 
+        #[wamr_host_function]
+        fn with_context(ctx: Option<&u32>, value: i64) -> i64 {
+            let _ = ctx;
+            value
+        }
+
         assert_eq!(add_host_function().signature(), "(II)I");
         assert_eq!(hash_host_function().signature(), "(*~*~)i");
         assert_eq!(noop_host_function().signature(), "()");
+        // The `Option<&T>` user-data parameter is not a wasm argument.
+        assert_eq!(with_context_host_function().signature(), "(I)I");
     }
 
     #[test]
@@ -116,7 +125,8 @@ mod tests {
             instruction_count_limit: 100_000,
         };
 
-        let program = Program::new(&mut program_bytes, &mut config).expect("load module");
+        let program =
+            Program::new(&mut program_bytes, &mut config, Box::new(())).expect("load module");
         assert_eq!(program.call().expect("call program"), 7);
     }
 
@@ -155,7 +165,8 @@ mod tests {
         let mut program_bytes = wat::parse_str(WAT).expect("parse WAT");
         let mut config = program_config();
 
-        let program = Program::new(&mut program_bytes, &mut config).expect("load module");
+        let program =
+            Program::new(&mut program_bytes, &mut config, Box::new(())).expect("load module");
         assert_eq!(program.call().expect("call program"), 532);
     }
 
@@ -190,7 +201,72 @@ mod tests {
         let mut program_bytes = wat::parse_str(WAT).expect("parse WAT");
         let mut config = program_config();
 
-        let program = Program::new(&mut program_bytes, &mut config).expect("load module");
+        let program =
+            Program::new(&mut program_bytes, &mut config, Box::new(())).expect("load module");
         assert_eq!(program.call().expect("call program"), 42);
+    }
+
+    #[test]
+    fn host_function_receives_user_data() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        use crate::runtime::WamrRuntime;
+        use crate::wamr_host_function;
+        use crate::wamr_program::Program;
+
+        #[wamr_host_function]
+        fn get_identity(ctx: Option<&u32>, unused: i64) -> i64 {
+            let _ = unused;
+            i64::from(*ctx.unwrap_or(&0))
+        }
+
+        const WAT: &str = r#"(module
+            (import "env" "get_identity" (func (param i64) (result i64)))
+            (func (export "program") (result i64)
+                i64.const 0
+                call 0))"#;
+
+        let _runtime =
+            WamrRuntime::new(vec![get_identity_host_function()], 16 << 20).expect("init runtime");
+        let mut program_bytes = wat::parse_str(WAT).expect("parse WAT");
+        let mut config = program_config();
+
+        let program =
+            Program::new(&mut program_bytes, &mut config, Box::new(7u32)).expect("load module");
+        assert_eq!(program.call().expect("call program"), 7);
+        // Host side can inspect the same payload.
+        assert_eq!(program.user_data::<u32>(), Some(&7));
+    }
+
+    #[test]
+    fn host_function_user_data_type_mismatch_is_none() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        use crate::runtime::WamrRuntime;
+        use crate::wamr_host_function;
+        use crate::wamr_program::Program;
+
+        #[wamr_host_function]
+        fn get_identity(ctx: Option<&u32>, unused: i64) -> i64 {
+            let _ = unused;
+            i64::from(*ctx.unwrap_or(&0))
+        }
+
+        const WAT: &str = r#"(module
+            (import "env" "get_identity" (func (param i64) (result i64)))
+            (func (export "program") (result i64)
+                i64.const 0
+                call 0))"#;
+
+        let _runtime =
+            WamrRuntime::new(vec![get_identity_host_function()], 16 << 20).expect("init runtime");
+        let mut program_bytes = wat::parse_str(WAT).expect("parse WAT");
+        let mut config = program_config();
+
+        // Installed payload is `u64`, but the host function asks for `u32`.
+        // The checked downcast must yield `None` (deny) rather than reinterpret.
+        let program =
+            Program::new(&mut program_bytes, &mut config, Box::new(7u64)).expect("load module");
+        assert_eq!(program.call().expect("call program"), 0);
+        assert_eq!(program.user_data::<u32>(), None);
+        assert_eq!(program.user_data::<u64>(), Some(&7));
     }
 }

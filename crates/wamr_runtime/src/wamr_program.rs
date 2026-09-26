@@ -1,8 +1,10 @@
 use crate::ERROR_BUFFER_SIZE;
+use crate::runtime::{self, UserData};
 use crate::wamr_sys;
 use crate::wamr_sys::wamr_c;
 use color_eyre::eyre::Result;
 use color_eyre::eyre::{ensure, eyre};
+use std::any::Any;
 use std::convert::TryFrom;
 use std::ffi::c_char;
 
@@ -20,6 +22,10 @@ pub struct Program {
     instance: *mut wamr_c::WASMModuleInstanceCommon,
     exec_env: *mut wamr_c::WASMExecEnv,
     program_func: wamr_c::wasm_function_inst_t,
+    // Owns the payload pointed to by this program's `exec_env` user data. The
+    // heap allocation is stable across moves of `Program`, so the installed
+    // pointer stays valid until `Drop` destroys the execution environment.
+    user_data: Box<UserData>,
 }
 
 impl Drop for Program {
@@ -35,7 +41,11 @@ impl Drop for Program {
 unsafe impl Send for Program {}
 
 impl Program {
-    pub fn new(program_bytes: &mut [u8], program_config: &mut ProgramConfig) -> Result<Self> {
+    pub fn new(
+        program_bytes: &mut [u8],
+        program_config: &mut ProgramConfig,
+        user_data: Box<dyn Any + Send>,
+    ) -> Result<Self> {
         let ProgramConfig {
             error_buf,
             stack_size,
@@ -129,12 +139,22 @@ impl Program {
             return Err(eyre!("Failed to find 'program' function"));
         }
 
-        Ok(Program {
+        let program = Program {
             module,
             instance,
             exec_env,
             program_func,
-        })
+            user_data: Box::new(UserData::new(user_data)),
+        };
+
+        runtime::install_user_data(program.exec_env, &program.user_data);
+
+        Ok(program)
+    }
+
+    /// Borrows the user data this program was created with.
+    pub fn user_data<T: Any>(&self) -> Option<&T> {
+        self.user_data.value.as_ref().downcast_ref::<T>()
     }
 
     pub fn call(&self) -> Result<u64> {

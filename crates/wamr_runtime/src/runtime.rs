@@ -1,5 +1,6 @@
 use crate::wamr_sys::{self, wamr_c};
 use color_eyre::eyre::{Context, Result, eyre};
+use std::any::Any;
 use std::ffi::c_void;
 use std::fmt::Display;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -8,6 +9,51 @@ use std::sync::atomic::{AtomicBool, Ordering};
 // init/full_init is ref-counted and silently ignores init arguments on
 // subsequent calls, so this guard lives in the Rust wrapper.
 static RUNTIME_INITIALIZED: AtomicBool = AtomicBool::new(false);
+
+/// Type-erased payload attached to a program's execution environment.
+///
+/// WAMR's `exec_env->user_data` is a single opaque pointer. `UserData` is the
+/// stable, thin allocation that this crate installs there; keeping the payload
+/// behind a [`Box<dyn Any>`] lets [`user_data`] recover it with a checked
+/// downcast instead of an unchecked pointer cast.
+pub(crate) struct UserData {
+    pub(crate) value: Box<dyn Any + Send>,
+}
+
+impl UserData {
+    pub(crate) fn new(value: Box<dyn Any + Send>) -> Self {
+        UserData { value }
+    }
+}
+
+/// Installs `user_data` into the execution environment.
+///
+/// Crate-private because the soundness of [`user_data`] relies on this crate
+/// being the only writer of `exec_env->user_data`.
+pub(crate) fn install_user_data(exec_env: *mut wamr_c::WASMExecEnv, user_data: &UserData) {
+    wamr_sys::wasm_runtime_set_user_data(exec_env, user_data as *const UserData as *mut c_void);
+}
+
+/// Retrieves the user data installed for the calling program.
+///
+/// Returns an owned clone rather than a borrow, so callers can never hold a
+/// reference past the lifetime of the execution environment. A mismatched `T`
+/// (or a missing payload) yields `None` instead of undefined behavior.
+pub fn user_data<T: Any + Clone>(exec_env: *mut c_void) -> Option<T> {
+    let header = wamr_sys::wasm_runtime_get_user_data(exec_env as *mut wamr_c::WASMExecEnv)
+        as *const UserData;
+    if header.is_null() {
+        return None;
+    }
+
+    // SAFETY: `exec_env` is a WAMR execution environment whose user data is only
+    // ever installed by `install_user_data`, so it is either null (checked above)
+    // or a valid `UserData` allocated by `Program`.
+    let header = unsafe { &*header };
+    (header.value.as_ref() as &dyn Any)
+        .downcast_ref::<T>()
+        .cloned()
+}
 
 pub struct WamrRuntime {
     heap: Vec<u8>,
