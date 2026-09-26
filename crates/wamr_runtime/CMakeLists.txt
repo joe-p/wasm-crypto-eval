@@ -75,7 +75,7 @@ if (NOT MSVC)
 endif ()
 
 # build out vmlib
-set (WAMR_ROOT_DIR ${CMAKE_CURRENT_LIST_DIR}/wasm-micro-runtime)
+set (WAMR_ROOT_DIR ${CMAKE_CURRENT_LIST_DIR}/../../wasm-micro-runtime)
 
 include (${WAMR_ROOT_DIR}/build-scripts/runtime_lib.cmake)
 

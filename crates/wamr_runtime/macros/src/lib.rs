@@ -31,7 +31,7 @@ use syn::{parse_macro_input, spanned::Spanned, FnArg, ItemFn, ReturnType, Type};
 /// - `&[u8]` and `&mut [u8]` (encoded as WAMR `*~`, i.e. a bounds-checked
 ///   pointer plus length)
 ///
-/// [`WamrHostFunction`]: crypto_eval::wamr_runtime::WamrHostFunction
+/// [`WamrHostFunction`]: wamr_runtime::runtime::WamrHostFunction
 #[proc_macro_attribute]
 pub fn wamr_host_function(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let func = parse_macro_input!(item as ItemFn);
@@ -157,7 +157,7 @@ fn expand(func: ItemFn) -> syn::Result<TokenStream2> {
                 let ident = format_ident!("__arg{}", index);
                 trampoline_params.push(quote!(#ident: #low));
                 call_args.push(quote!(#ident));
-                wamr_types.push(quote!(::crypto_eval::wamr_runtime::WamrType::#wamr));
+                wamr_types.push(quote!(::wamr_runtime::runtime::WamrType::#wamr));
                 signature.push(sig);
             }
             ArgKind::Bytes { mutable } => {
@@ -171,7 +171,7 @@ fn expand(func: ItemFn) -> syn::Result<TokenStream2> {
                 } else {
                     format_ident!("ByteSlice")
                 };
-                wamr_types.push(quote!(::crypto_eval::wamr_runtime::WamrType::#variant));
+                wamr_types.push(quote!(::wamr_runtime::runtime::WamrType::#variant));
                 signature.push_str("*~");
 
                 let from_raw_parts = if mutable {
@@ -229,7 +229,7 @@ fn expand(func: ItemFn) -> syn::Result<TokenStream2> {
         quote!(Some(vec![#(#wamr_types),*]))
     };
     let ctor_ret = match &ret_wamr {
-        Some(wamr) => quote!(Some(::crypto_eval::wamr_runtime::WamrType::#wamr)),
+        Some(wamr) => quote!(Some(::wamr_runtime::runtime::WamrType::#wamr)),
         None => quote!(None),
     };
 
@@ -251,8 +251,8 @@ fn expand(func: ItemFn) -> syn::Result<TokenStream2> {
         }
 
         #[allow(dead_code)]
-        #vis fn #helper() -> ::crypto_eval::wamr_runtime::WamrHostFunction {
-            ::crypto_eval::wamr_runtime::WamrHostFunction::new(
+        #vis fn #helper() -> ::wamr_runtime::runtime::WamrHostFunction {
+            ::wamr_runtime::runtime::WamrHostFunction::new(
                 stringify!(#fn_name).to_string(),
                 #trampoline as *mut ::core::ffi::c_void,
                 #ctor_args,

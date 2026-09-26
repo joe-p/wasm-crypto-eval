@@ -1,6 +1,7 @@
 #!/bin/bash
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CRATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "${CRATE_DIR}/../.." && pwd)"
 WAMR_DIR=${ROOT}/wasm-micro-runtime
 set -ex
 
@@ -22,6 +23,6 @@ mkdir -p build
 cd build
 
 # Configure and build with CMake to get the vmlib
-cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake ${CRATE_DIR} -DCMAKE_BUILD_TYPE=Release
 make vmlib
  

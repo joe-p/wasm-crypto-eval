@@ -1,14 +1,3 @@
-[package]
-name = "crypto-eval"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-color-eyre = "0.6.5"
-crypto-eval-macros = { path = "macros" }
-
-[build-dependencies]
-bindgen = "0.73.2"
-
 [workspace]
-members = ["macros"]
+resolver = "3"
+members = ["crates/wamr_runtime", "crates/wamr_runtime/macros"]

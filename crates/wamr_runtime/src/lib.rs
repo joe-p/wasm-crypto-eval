@@ -1,10 +1,10 @@
-extern crate self as crypto_eval;
+extern crate self as wamr_runtime;
 
 pub mod wamr_program;
-pub mod wamr_runtime;
+pub mod runtime;
 pub mod wamr_sys;
 
-pub use crypto_eval_macros::wamr_host_function;
+pub use wamr_runtime_macros::wamr_host_function;
 
 pub const ERROR_BUFFER_SIZE: usize = 128;
 
@@ -22,7 +22,7 @@ mod tests {
     fn wasm_program_returns_1337() {
         let _guard = TEST_LOCK.lock().unwrap();
         use crate::wamr_program::{Program, ProgramConfig};
-        use crate::wamr_runtime::WamrRuntime;
+        use crate::runtime::WamrRuntime;
 
         // Minimal WASM module:
         //   (module (func (export "program") (result i64) i64.const 1337))
@@ -52,7 +52,7 @@ mod tests {
     #[test]
     fn only_one_runtime_instance_allowed() {
         let _guard = TEST_LOCK.lock().unwrap();
-        use crate::wamr_runtime::WamrRuntime;
+        use crate::runtime::WamrRuntime;
 
         let runtime = WamrRuntime::new(vec![], 16 << 20).expect("init runtime");
 
@@ -99,7 +99,7 @@ mod tests {
         let _guard = TEST_LOCK.lock().unwrap();
         use crate::wamr_host_function;
         use crate::wamr_program::{Program, ProgramConfig};
-        use crate::wamr_runtime::WamrRuntime;
+        use crate::runtime::WamrRuntime;
 
         #[wamr_host_function]
         fn add(a: i64, b: i64) -> i64 {
@@ -154,7 +154,7 @@ mod tests {
         let _guard = TEST_LOCK.lock().unwrap();
         use crate::wamr_host_function;
         use crate::wamr_program::Program;
-        use crate::wamr_runtime::WamrRuntime;
+        use crate::runtime::WamrRuntime;
 
         #[wamr_host_function]
         fn sum(data: &[u8]) -> i64 {
@@ -198,7 +198,7 @@ mod tests {
         let _guard = TEST_LOCK.lock().unwrap();
         use crate::wamr_host_function;
         use crate::wamr_program::Program;
-        use crate::wamr_runtime::WamrRuntime;
+        use crate::runtime::WamrRuntime;
 
         #[wamr_host_function]
         fn fill(data: &mut [u8], value: u32) {

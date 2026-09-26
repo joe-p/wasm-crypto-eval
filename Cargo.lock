@@ -126,24 +126,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crypto-eval"
-version = "0.1.0"
-dependencies = [
- "bindgen",
- "color-eyre",
- "crypto-eval-macros",
-]
-
-[[package]]
-name = "crypto-eval-macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "eyre"
 version = "0.6.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -425,6 +407,24 @@ name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
+
+[[package]]
+name = "wamr_runtime"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "color-eyre",
+ "wamr_runtime-macros",
+]
+
+[[package]]
+name = "wamr_runtime-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
 
 [[package]]
 name = "windows-link"

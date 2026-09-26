@@ -1,6 +1,11 @@
+fn repo_root() -> std::path::PathBuf {
+    std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+        .expect("Failed to canonicalize repo root path")
+}
+
 fn wamr_root() -> String {
-    std::fs::canonicalize("./wasm-micro-runtime")
-        .expect("Failed to canonicalize wamr_root() path")
+    repo_root()
+        .join("wasm-micro-runtime")
         .to_str()
         .unwrap()
         .to_string()
@@ -30,7 +35,10 @@ fn main() {
     builder = add_include_path(builder, "core/shared/utils");
     builder = add_include_path(builder, "core/shared/utils/uncommon");
 
-    println!("cargo:rustc-link-search=native=build");
+    println!(
+        "cargo:rustc-link-search=native={}",
+        repo_root().join("build").to_str().unwrap()
+    );
     println!("cargo:rustc-link-lib=static=vmlib");
 
     if cfg!(target_os = "macos") {
