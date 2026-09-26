@@ -7,9 +7,15 @@ pub const ERROR_BUFFER_SIZE: usize = 128;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // WAMR runtime creation is process-global, so tests that create a
+    // WamrRuntime must not run concurrently.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn wasm_program_returns_1337() {
+        let _guard = TEST_LOCK.lock().unwrap();
         use crate::wamr_program::{Program, ProgramConfig};
         use crate::wamr_runtime::WamrRuntime;
 
@@ -36,5 +42,27 @@ mod tests {
 
         let program = Program::new(&mut program_bytes, &mut config).expect("load module");
         assert_eq!(program.call().expect("call program"), 1337);
+    }
+
+    #[test]
+    fn only_one_runtime_instance_allowed() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        use crate::wamr_runtime::WamrRuntime;
+
+        let runtime = WamrRuntime::new(vec![], 16 << 20).expect("init runtime");
+
+        let second = WamrRuntime::new(vec![], 16 << 20);
+        assert!(
+            second.is_err(),
+            "second runtime instance should be rejected"
+        );
+
+        drop(runtime);
+
+        let third = WamrRuntime::new(vec![], 16 << 20);
+        assert!(
+            third.is_ok(),
+            "runtime should be creatable again after drop"
+        );
     }
 }

@@ -2,6 +2,12 @@ use crate::wamr_sys::{self, wamr_c};
 use color_eyre::eyre::{Context, Result, eyre};
 use std::ffi::c_void;
 use std::fmt::Display;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+// Ensures that only one WamrRuntime instance exists at a time. WAMR's own
+// init/full_init is ref-counted and silently ignores init arguments on
+// subsequent calls, so this guard lives in the Rust wrapper.
+static RUNTIME_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 pub struct WamrRuntime {
     heap: Vec<u8>,
@@ -15,6 +21,7 @@ pub struct WamrRuntime {
 impl Drop for WamrRuntime {
     fn drop(&mut self) {
         wamr_sys::wasm_runtime_destroy();
+        RUNTIME_INITIALIZED.store(false, Ordering::Release);
     }
 }
 
@@ -138,6 +145,15 @@ impl WamrRuntime {
             signature: c"(I)".as_ptr(),
             ..Default::default()
         });
+
+        if RUNTIME_INITIALIZED
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err(eyre!(
+                "WAMR runtime already initialized; only one WamrRuntime instance is allowed"
+            ));
+        }
 
         let runtime = WamrRuntime {
             native_symbols,
