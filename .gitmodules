@@ -1,0 +1,3 @@
+[submodule "wasm-micro-runtime"]
+	path = wasm-micro-runtime
+	url = https://github.com/wasm-micro-runtime/wasm-micro-runtime
