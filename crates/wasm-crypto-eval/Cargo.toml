@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 sha2 = { version = "0.10", default-features = false }
 spin = { version = "0.9", default-features = false, features = ["spin_mutex"] }
-wamr_runtime = { version = "0.1.0", path = "../wamr_runtime" }
+wasmi_runtime = { version = "0.1.0", path = "../wasmi_runtime" }
 
 [dev-dependencies]
 wat = "1.0"

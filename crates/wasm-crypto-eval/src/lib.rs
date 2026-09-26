@@ -7,7 +7,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::str::from_utf8;
 use sha2::{Digest, Sha256};
-use wamr_runtime::{runtime::WamrRuntime, wamr_host_function};
+use wasmi_runtime::runtime::{RuntimeConfig, WasmRuntime};
+use wasmi_runtime::wasm_host_function;
 
 /// Identity of a program, derived from the SHA-256 of its original module bytes.
 ///
@@ -21,7 +22,7 @@ pub struct ProgramId([u8; 32]);
 /// Call this on the *original* bytes before [`Program::new`], which may mutate
 /// the buffer in place.
 ///
-/// [`Program::new`]: wamr_runtime::wamr_program::Program::new
+/// [`Program::new`]: wasmi_runtime::program::Program::new
 pub fn program_id(program_bytes: &[u8]) -> ProgramId {
     let digest = Sha256::digest(program_bytes);
     ProgramId(digest.into())
@@ -38,9 +39,8 @@ pub trait SecretStore: Send + Sync {
     fn write(&self, program: &ProgramId, name: &str, data: &[u8]);
 }
 
-// The host functions are capture-free `extern "C"` trampolines, so the store
-// instance is installed once at `create_runtime` time and reached through this
-// global. Only one WamrRuntime may exist at a time, which makes it unambiguous.
+// The host functions are capture-free, so the store instance is installed once
+// at `create_runtime` time and reached through this global.
 static SECRET_STORE: spin::Mutex<Option<Arc<dyn SecretStore>>> = spin::Mutex::new(None);
 
 /// Runs `f` with the configured store, returning `None` if no store is
@@ -53,10 +53,10 @@ fn with_store<R>(f: impl FnOnce(&dyn SecretStore) -> R) -> Option<R> {
     Some(f(store.as_ref()))
 }
 
-pub fn create_runtime(store: impl SecretStore + 'static) -> WamrRuntime {
+pub fn create_runtime(store: impl SecretStore + 'static) -> WasmRuntime {
     *SECRET_STORE.lock() = Some(Arc::new(store));
 
-    #[wamr_host_function]
+    #[wasm_host_function]
     fn store_read(ctx: Option<&ProgramId>, name: &[u8], out: &mut [u8]) -> u32 {
         // Identity comes from the host-set execution context, never from wasm.
         // Any missing context, malformed key, or store failure denies access.
@@ -74,7 +74,7 @@ pub fn create_runtime(store: impl SecretStore + 'static) -> WamrRuntime {
         len as u32
     }
 
-    #[wamr_host_function]
+    #[wasm_host_function]
     fn store_write(ctx: Option<&ProgramId>, name: &[u8], data: &[u8]) {
         let Some(program) = ctx else {
             return;
@@ -85,9 +85,9 @@ pub fn create_runtime(store: impl SecretStore + 'static) -> WamrRuntime {
         with_store(|store| store.write(program, name, data));
     }
 
-    WamrRuntime::new(
+    WasmRuntime::new(
+        &RuntimeConfig::default(),
         vec![store_read_host_function(), store_write_host_function()],
-        16 << 20,
     )
     .expect("init runtime")
 }
@@ -98,11 +98,10 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::LazyLock;
     use std::sync::Mutex;
-    use wamr_runtime::ERROR_BUFFER_SIZE;
-    use wamr_runtime::wamr_program::{Program, ProgramConfig};
+    use wasmi_runtime::program::{Program, ProgramConfig};
 
-    // WAMR runtime creation is process-global, so tests that create a
-    // WamrRuntime must not run concurrently.
+    // The in-memory store is process-global, so tests that mutate it must not
+    // run concurrently.
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     struct MemoryStore;
@@ -135,34 +134,29 @@ mod tests {
 
     fn program_config() -> ProgramConfig {
         ProgramConfig {
-            error_buf: [0; ERROR_BUFFER_SIZE],
-            stack_size: 1 << 16,
-            app_heap_size: 1 << 16,
-            max_pages: 0,
-            instruction_count_limit: 100_000,
+            fuel: 100_000,
+            memory_limit_bytes: 1 << 16,
         }
     }
 
     /// Loads a module, binding its content-hash identity as host user data.
-    fn load(wat: &str) -> Program {
+    fn load(runtime: &WasmRuntime, wat: &str) -> Program {
         let mut program_bytes = wat::parse_str(wat).expect("parse WAT");
         let id = program_id(&program_bytes);
-        let mut config = program_config();
-        Program::new(&mut program_bytes, &mut config, Box::new(id)).expect("load module")
+        Program::new(runtime, &mut program_bytes, &program_config(), Box::new(id))
+            .expect("load module")
     }
 
-    // Writes "value" to key "secret", then reads it back and returns the first
-    // byte shifted up by the returned length. Requires an identity to succeed.
+    // Writes "value" to key "secret", then reads it back into a fixed buffer at
+    // address 32 and returns the first byte shifted up by the returned length.
+    // Requires an identity to succeed.
     const WRITER: &str = r#"(module
         (import "env" "store_write" (func $store_write (param i32 i32 i32 i32)))
         (import "env" "store_read" (func $store_read (param i32 i32 i32 i32) (result i32)))
-        (import "env" "host_malloc" (func $host_malloc (param i64) (result i64)))
-        (import "env" "host_free" (func $host_free (param i64)))
         (memory (export "memory") 1)
         (data (i32.const 0) "secret")
         (data (i32.const 16) "value")
         (func (export "program") (result i64)
-            (local $out i64)
             (local $n i32)
             i32.const 0
             i32.const 6
@@ -170,56 +164,36 @@ mod tests {
             i32.const 5
             call $store_write
 
-            i64.const 5
-            call $host_malloc
-            local.set $out
-
             i32.const 0
             i32.const 6
-            local.get $out
-            i32.wrap_i64
+            i32.const 32
             i32.const 5
             call $store_read
             local.set $n
 
-            local.get $out
-            i32.wrap_i64
+            i32.const 32
             i32.load8_u
             i64.extend_i32_u
             local.get $n
             i64.extend_i32_u
             i64.const 8
             i64.shl
-            i64.or
+            i64.or))"#;
 
-            local.get $out
-            call $host_free))"#;
-
-    // Reads key "secret" into a fresh buffer and returns the number of bytes the
+    // Reads key "secret" into a fixed buffer and returns the number of bytes the
     // host reported.
     const READER: &str = r#"(module
         (import "env" "store_read" (func $store_read (param i32 i32 i32 i32) (result i32)))
-        (import "env" "host_malloc" (func $host_malloc (param i64) (result i64)))
-        (import "env" "host_free" (func $host_free (param i64)))
         (memory (export "memory") 1)
         (data (i32.const 0) "secret")
         (func (export "program") (result i64)
-            (local $out i64)
             (local $n i32)
-            i64.const 5
-            call $host_malloc
-            local.set $out
-
             i32.const 0
             i32.const 6
-            local.get $out
-            i32.wrap_i64
+            i32.const 32
             i32.const 5
             call $store_read
             local.set $n
-
-            local.get $out
-            call $host_free
 
             local.get $n
             i64.extend_i32_u))"#;
@@ -229,8 +203,8 @@ mod tests {
         let _guard = TEST_LOCK.lock().unwrap();
         MEM_STORE.lock().unwrap().clear();
 
-        let _runtime = create_runtime(MemoryStore);
-        let program = load(WRITER);
+        let runtime = create_runtime(MemoryStore);
+        let mut program = load(&runtime, WRITER);
         let result = program.call().expect("call program");
 
         // low byte: 'v' (118), high byte: length 5
@@ -242,10 +216,10 @@ mod tests {
         let _guard = TEST_LOCK.lock().unwrap();
         MEM_STORE.lock().unwrap().clear();
 
-        let _runtime = create_runtime(MemoryStore);
+        let runtime = create_runtime(MemoryStore);
 
         // The writer stores "value" under "secret" in its own namespace...
-        let writer = load(WRITER);
+        let mut writer = load(&runtime, WRITER);
         assert_eq!(
             writer.call().expect("call writer"),
             (5u64 << 8) | u64::from(b'v')
@@ -253,7 +227,7 @@ mod tests {
 
         // ...but a different module (different bytes, different identity) sees
         // nothing. If its read leaked, it would report length 5.
-        let reader = load(READER);
+        let mut reader = load(&runtime, READER);
         assert_eq!(reader.call().expect("call reader"), 0);
     }
 
@@ -262,7 +236,7 @@ mod tests {
         let _guard = TEST_LOCK.lock().unwrap();
         MEM_STORE.lock().unwrap().clear();
 
-        let _runtime = create_runtime(MemoryStore);
+        let runtime = create_runtime(MemoryStore);
 
         // Seed a secret owned by the reader's identity, then load the same
         // module with a *different* user-data type: the accessor must not
@@ -271,9 +245,13 @@ mod tests {
         let owner = program_id(&program_bytes);
         MemoryStore.write(&owner, "secret", b"value");
 
-        let mut config = program_config();
-        let program =
-            Program::new(&mut program_bytes, &mut config, Box::new(0u32)).expect("load module");
+        let mut program = Program::new(
+            &runtime,
+            &mut program_bytes,
+            &program_config(),
+            Box::new(0u32),
+        )
+        .expect("load module");
         assert_eq!(program.call().expect("call program"), 0);
     }
 }

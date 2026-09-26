@@ -1,14 +1,12 @@
 [package]
-name = "wamr_runtime"
+name = "wasmi_runtime"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 snafu = { version = "0.9", default-features = false, features = ["rust_1_81", "alloc"] }
-wamr_runtime-macros = { path = "macros" }
+wasmi = { version = "2", default-features = false, features = ["validate", "portable-dispatch"] }
+wasmi_runtime-macros = { path = "macros" }
 
 [dev-dependencies]
 wat = "1.0"
-
-[build-dependencies]
-bindgen = "0.73.2"

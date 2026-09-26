@@ -1,5 +1,5 @@
 [package]
-name = "wamr_runtime-macros"
+name = "wasmi_runtime-macros"
 version = "0.1.0"
 edition = "2021"
 
