@@ -1,5 +1,5 @@
 use sha2::{Digest, Sha256};
-use std::sync::Mutex;
+use std::sync::{Arc, LazyLock, Mutex};
 use wamr_runtime::{runtime::WamrRuntime, wamr_host_function};
 
 /// Identity of a program, derived from the SHA-256 of its original module bytes.
@@ -20,35 +20,35 @@ pub fn program_id(program_bytes: &[u8]) -> ProgramId {
     ProgramId(digest.into())
 }
 
-pub trait SecretStore {
-    fn read(program: &ProgramId, name: &str) -> Vec<u8>;
-    fn write(program: &ProgramId, name: &str, data: &[u8]);
+/// Backing store for per-program secrets.
+///
+/// Implementations take `&self` so they can own real backend state (a client,
+/// connection pool, or configuration) rather than relying on globals. A single
+/// instance is installed by [`create_runtime`] and shared across host calls, so
+/// implementations must be `Send + Sync`.
+pub trait SecretStore: Send + Sync {
+    fn read(&self, program: &ProgramId, name: &str) -> Vec<u8>;
+    fn write(&self, program: &ProgramId, name: &str, data: &[u8]);
 }
 
-#[derive(Clone, Copy)]
-struct StoreVtable {
-    read: fn(&ProgramId, &str) -> Vec<u8>,
-    write: fn(&ProgramId, &str, &[u8]),
-}
-
-// The host functions are capture-free `extern "C"` trampolines, so the store is
-// selected by type at `create_runtime` time and reached through this global.
-// Only one WamrRuntime may exist at a time, which makes the global unambiguous.
-static SECRET_STORE: Mutex<Option<StoreVtable>> = Mutex::new(None);
+// The host functions are capture-free `extern "C"` trampolines, so the store
+// instance is installed once at `create_runtime` time and reached through this
+// global. Only one WamrRuntime may exist at a time, which makes it unambiguous.
+static SECRET_STORE: LazyLock<Mutex<Option<Arc<dyn SecretStore>>>> =
+    LazyLock::new(|| Mutex::new(None));
 
 /// Runs `f` with the configured store, returning `None` if no store is
 /// configured or the lock is poisoned. Never panics.
-fn with_store<R>(f: impl FnOnce(&StoreVtable) -> R) -> Option<R> {
-    let guard = SECRET_STORE.lock().ok()?;
-    guard.as_ref().map(f)
+///
+/// The `Arc` is cloned out and the lock released before `f` runs, so a slow
+/// backend does not serialize every host call behind the registry mutex.
+fn with_store<R>(f: impl FnOnce(&dyn SecretStore) -> R) -> Option<R> {
+    let store = SECRET_STORE.lock().ok()?.clone()?;
+    Some(f(store.as_ref()))
 }
 
-pub fn create_runtime<S: SecretStore>(store: S) -> WamrRuntime {
-    let _ = store; // unused: the static trait is selected by type, not by value
-    *SECRET_STORE.lock().expect("secret store mutex poisoned") = Some(StoreVtable {
-        read: <S as SecretStore>::read,
-        write: <S as SecretStore>::write,
-    });
+pub fn create_runtime(store: impl SecretStore + 'static) -> WamrRuntime {
+    *SECRET_STORE.lock().expect("secret store mutex poisoned") = Some(Arc::new(store));
 
     #[wamr_host_function]
     fn store_read(ctx: Option<&ProgramId>, name: &[u8], out: &mut [u8]) -> u32 {
@@ -60,7 +60,7 @@ pub fn create_runtime<S: SecretStore>(store: S) -> WamrRuntime {
         let Ok(name) = std::str::from_utf8(name) else {
             return 0;
         };
-        let Some(data) = with_store(|vtable| (vtable.read)(program, name)) else {
+        let Some(data) = with_store(|store| store.read(program, name)) else {
             return 0;
         };
         let len = data.len().min(out.len());
@@ -76,7 +76,7 @@ pub fn create_runtime<S: SecretStore>(store: S) -> WamrRuntime {
         let Ok(name) = std::str::from_utf8(name) else {
             return;
         };
-        with_store(|vtable| (vtable.write)(program, name, data));
+        with_store(|store| store.write(program, name, data));
     }
 
     WamrRuntime::new(
@@ -107,7 +107,7 @@ mod tests {
         LazyLock::new(|| Mutex::new(HashMap::new()));
 
     impl SecretStore for MemoryStore {
-        fn read(program: &ProgramId, name: &str) -> Vec<u8> {
+        fn read(&self, program: &ProgramId, name: &str) -> Vec<u8> {
             MEM_STORE
                 .lock()
                 .unwrap()
@@ -117,7 +117,7 @@ mod tests {
                 .unwrap_or_default()
         }
 
-        fn write(program: &ProgramId, name: &str, data: &[u8]) {
+        fn write(&self, program: &ProgramId, name: &str, data: &[u8]) {
             MEM_STORE
                 .lock()
                 .unwrap()
@@ -263,7 +263,7 @@ mod tests {
         // downcast, so the read is denied even though the secret exists.
         let mut program_bytes = wat::parse_str(READER).expect("parse WAT");
         let owner = program_id(&program_bytes);
-        MemoryStore::write(&owner, "secret", b"value");
+        MemoryStore.write(&owner, "secret", b"value");
 
         let mut config = program_config();
         let program =
