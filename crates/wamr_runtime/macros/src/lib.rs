@@ -289,7 +289,7 @@ fn expand(func: ItemFn) -> syn::Result<TokenStream2> {
     let ctor_args = if wamr_types.is_empty() {
         quote!(None)
     } else {
-        quote!(Some(vec![#(#wamr_types),*]))
+        quote!(Some(::wamr_runtime::__private::vec![#(#wamr_types),*]))
     };
     let ctor_ret = match &ret_wamr {
         Some(wamr) => quote!(Some(::wamr_runtime::runtime::WamrType::#wamr)),
@@ -317,7 +317,7 @@ fn expand(func: ItemFn) -> syn::Result<TokenStream2> {
         #[allow(dead_code)]
         #vis fn #helper() -> ::wamr_runtime::runtime::WamrHostFunction {
             ::wamr_runtime::runtime::WamrHostFunction::new(
-                stringify!(#fn_name).to_string(),
+                ::wamr_runtime::__private::ToString::to_string(&stringify!(#fn_name)),
                 #trampoline as *mut ::core::ffi::c_void,
                 #ctor_args,
                 #ctor_ret,

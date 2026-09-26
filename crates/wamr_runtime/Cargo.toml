@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-snafu = { version = "0.9", default-features = false, features = ["rust_1_81"] }
+snafu = { version = "0.9", default-features = false, features = ["rust_1_81", "alloc"] }
 wamr_runtime-macros = { path = "macros" }
 
 [dev-dependencies]

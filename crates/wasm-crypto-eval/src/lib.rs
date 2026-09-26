@@ -1,5 +1,12 @@
+#![cfg_attr(not(test), no_std)]
+
+extern crate alloc;
+
+use alloc::sync::Arc;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::str::from_utf8;
 use sha2::{Digest, Sha256};
-use std::sync::{Arc, LazyLock, Mutex};
 use wamr_runtime::{runtime::WamrRuntime, wamr_host_function};
 
 /// Identity of a program, derived from the SHA-256 of its original module bytes.
@@ -34,21 +41,20 @@ pub trait SecretStore: Send + Sync {
 // The host functions are capture-free `extern "C"` trampolines, so the store
 // instance is installed once at `create_runtime` time and reached through this
 // global. Only one WamrRuntime may exist at a time, which makes it unambiguous.
-static SECRET_STORE: LazyLock<Mutex<Option<Arc<dyn SecretStore>>>> =
-    LazyLock::new(|| Mutex::new(None));
+static SECRET_STORE: spin::Mutex<Option<Arc<dyn SecretStore>>> = spin::Mutex::new(None);
 
 /// Runs `f` with the configured store, returning `None` if no store is
-/// configured or the lock is poisoned. Never panics.
+/// configured. Never panics.
 ///
 /// The `Arc` is cloned out and the lock released before `f` runs, so a slow
 /// backend does not serialize every host call behind the registry mutex.
 fn with_store<R>(f: impl FnOnce(&dyn SecretStore) -> R) -> Option<R> {
-    let store = SECRET_STORE.lock().ok()?.clone()?;
+    let store = SECRET_STORE.lock().clone()?;
     Some(f(store.as_ref()))
 }
 
 pub fn create_runtime(store: impl SecretStore + 'static) -> WamrRuntime {
-    *SECRET_STORE.lock().expect("secret store mutex poisoned") = Some(Arc::new(store));
+    *SECRET_STORE.lock() = Some(Arc::new(store));
 
     #[wamr_host_function]
     fn store_read(ctx: Option<&ProgramId>, name: &[u8], out: &mut [u8]) -> u32 {
@@ -57,7 +63,7 @@ pub fn create_runtime(store: impl SecretStore + 'static) -> WamrRuntime {
         let Some(program) = ctx else {
             return 0;
         };
-        let Ok(name) = std::str::from_utf8(name) else {
+        let Ok(name) = from_utf8(name) else {
             return 0;
         };
         let Some(data) = with_store(|store| store.read(program, name)) else {
@@ -73,7 +79,7 @@ pub fn create_runtime(store: impl SecretStore + 'static) -> WamrRuntime {
         let Some(program) = ctx else {
             return;
         };
-        let Ok(name) = std::str::from_utf8(name) else {
+        let Ok(name) = from_utf8(name) else {
             return;
         };
         with_store(|store| store.write(program, name, data));

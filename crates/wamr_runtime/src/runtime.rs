@@ -3,10 +3,15 @@ use crate::error::{
     Result, RuntimeAlreadyInitializedSnafu, RuntimeInitSnafu,
 };
 use crate::wamr_sys::{self, wamr_c};
-use std::any::Any;
-use std::ffi::c_void;
-use std::fmt::Display;
-use std::sync::atomic::{AtomicBool, Ordering};
+use alloc::boxed::Box;
+use alloc::ffi::CString;
+use alloc::string::{String, ToString};
+use alloc::vec;
+use alloc::vec::Vec;
+use core::any::Any;
+use core::ffi::c_void;
+use core::fmt::Display;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 // Ensures that only one WamrRuntime instance exists at a time. WAMR's own
 // init/full_init is ref-counted and silently ignores init arguments on
@@ -64,7 +69,7 @@ pub struct WamrRuntime {
     // A Vec to hold CString references to ensure they live as long as the runtime
     // This seems preferable to having to deal with lifetimes since the allocations
     // only happen once at runtime initialization
-    _c_strings: Vec<std::ffi::CString>,
+    _c_strings: Vec<CString>,
 }
 
 impl Drop for WamrRuntime {
@@ -78,7 +83,7 @@ extern "C" fn host_malloc(exec_env: *mut c_void, size: u64) -> u64 {
     let module_inst =
         unsafe { wamr_c::wasm_runtime_get_module_inst(exec_env as *mut wamr_c::WASMExecEnv) };
 
-    wamr_sys::wasm_runtime_module_malloc(module_inst, size, std::ptr::null_mut())
+    wamr_sys::wasm_runtime_module_malloc(module_inst, size, core::ptr::null_mut())
 }
 
 extern "C" fn host_free(exec_env: *mut c_void, ptr: u64) {
@@ -99,7 +104,7 @@ pub enum WamrType {
 }
 
 impl Display for WamrType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             WamrType::I64 => write!(f, "I"),
             WamrType::I32 => write!(f, "i"),
@@ -156,18 +161,18 @@ impl WamrHostFunction {
 
 impl WamrRuntime {
     pub fn new(host_functions: Vec<WamrHostFunction>, runtime_heap_size: usize) -> Result<Self> {
-        let mut c_strings: Vec<std::ffi::CString> = vec![];
+        let mut c_strings: Vec<CString> = vec![];
         let mut native_symbols: Vec<wamr_c::NativeSymbol> =
             Vec::with_capacity(host_functions.len() + 1);
 
         for host_fn in &host_functions {
-            let name = std::ffi::CString::new(host_fn.name.clone()).map_err(|_| {
+            let name = CString::new(host_fn.name.clone()).map_err(|_| {
                 HostFunctionNameContainsNullSnafu {
                     name: host_fn.name.clone(),
                 }
                 .build()
             })?;
-            let signature = std::ffi::CString::new(host_fn.signature()).map_err(|_| {
+            let signature = CString::new(host_fn.signature()).map_err(|_| {
                 HostFunctionSignatureContainsNullSnafu {
                     name: host_fn.name.clone(),
                 }

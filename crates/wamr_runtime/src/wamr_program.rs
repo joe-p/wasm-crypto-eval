@@ -7,10 +7,11 @@ use crate::error::{
 use crate::runtime::{self, UserData};
 use crate::wamr_sys;
 use crate::wamr_sys::wamr_c;
+use alloc::boxed::Box;
+use alloc::string::ToString;
+use core::any::Any;
+use core::ffi::{CStr, c_char};
 use snafu::ensure;
-use std::any::Any;
-use std::convert::TryFrom;
-use std::ffi::c_char;
 
 pub struct ProgramConfig {
     pub error_buf: [c_char; ERROR_BUFFER_SIZE],
@@ -81,7 +82,7 @@ impl Program {
         );
 
         if module.is_null() {
-            let err_msg = unsafe { std::ffi::CStr::from_ptr(error_buf.as_ptr()) }
+            let err_msg = unsafe { CStr::from_ptr(error_buf.as_ptr()) }
                 .to_string_lossy()
                 .into_owned();
             return LoadModuleSnafu { message: err_msg }.fail();
@@ -119,7 +120,7 @@ impl Program {
 
         if instance.is_null() {
             wamr_sys::wasm_runtime_unload(module);
-            let err_msg = unsafe { std::ffi::CStr::from_ptr(error_buf.as_ptr()) }
+            let err_msg = unsafe { CStr::from_ptr(error_buf.as_ptr()) }
                 .to_string_lossy()
                 .into_owned();
             return InstantiateModuleSnafu { message: err_msg }.fail();
@@ -178,13 +179,13 @@ impl Program {
             1,
             results.as_mut_ptr(),
             0,
-            std::ptr::null_mut(),
+            core::ptr::null_mut(),
         ) {
             let ptr = wamr_sys::wasm_runtime_get_exception(self.instance);
             let msg = if ptr.is_null() {
                 "unknown WAMR exception".to_string()
             } else {
-                unsafe { std::ffi::CStr::from_ptr(ptr) }
+                unsafe { CStr::from_ptr(ptr) }
                     .to_string_lossy()
                     .into_owned()
             };

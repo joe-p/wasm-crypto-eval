@@ -33,7 +33,7 @@ pub fn wasm_runtime_get_export_count(module: wamr_c::wasm_module_t) -> i32 {
 pub fn wasm_runtime_module_malloc(
     module_inst: wamr_c::wasm_module_inst_t,
     size: u64,
-    p_native_addr: *mut *mut ::std::os::raw::c_void,
+    p_native_addr: *mut *mut core::ffi::c_void,
 ) -> u64 {
     unsafe { wamr_c::wasm_runtime_module_malloc(module_inst, size, p_native_addr) }
 }
@@ -65,7 +65,7 @@ pub fn wasm_runtime_unload(module: *mut wamr_c::WASMModuleCommon) {
 pub fn wasm_runtime_load(
     buf: *mut u8,
     size: u32,
-    error_buf: *mut ::std::os::raw::c_char,
+    error_buf: *mut core::ffi::c_char,
     error_buf_size: u32,
 ) -> wamr_c::wasm_module_t {
     unsafe { wamr_c::wasm_runtime_load(buf, size, error_buf, error_buf_size) }
@@ -74,7 +74,7 @@ pub fn wasm_runtime_load(
 pub fn wasm_runtime_instantiate_ex(
     module: wamr_c::wasm_module_t,
     args: *const wamr_c::InstantiationArgs,
-    error_buf: *mut ::std::os::raw::c_char,
+    error_buf: *mut core::ffi::c_char,
     error_buf_size: u32,
 ) -> wamr_c::wasm_module_inst_t {
     unsafe { wamr_c::wasm_runtime_instantiate_ex(module, args, error_buf, error_buf_size) }
@@ -89,7 +89,7 @@ pub fn wasm_runtime_create_exec_env(
 
 pub fn wasm_runtime_lookup_function(
     instance: *mut wamr_c::WASMModuleInstanceCommon,
-    name: *const ::std::os::raw::c_char,
+    name: *const core::ffi::c_char,
 ) -> wamr_c::wasm_function_inst_t {
     unsafe { wamr_c::wasm_runtime_lookup_function(instance, name) }
 }
@@ -109,7 +109,7 @@ pub fn wasm_runtime_call_wasm_a(
 
 pub fn wasm_runtime_get_exception(
     instance: *mut wamr_c::WASMModuleInstanceCommon,
-) -> *const ::std::os::raw::c_char {
+) -> *const core::ffi::c_char {
     unsafe { wamr_c::wasm_runtime_get_exception(instance) }
 }
 
@@ -124,7 +124,7 @@ pub fn wasm_runtime_full_init(args: *mut wamr_c::RuntimeInitArgs) -> bool {
 }
 
 pub fn wasm_runtime_register_natives(
-    module_name: *const ::std::os::raw::c_char,
+    module_name: *const core::ffi::c_char,
     natives: *mut wamr_c::NativeSymbol,
     n_native_symbols: u32,
 ) -> bool {
@@ -133,13 +133,13 @@ pub fn wasm_runtime_register_natives(
 
 pub fn wasm_runtime_get_user_data(
     exec_env: *mut wamr_c::WASMExecEnv,
-) -> *mut ::std::os::raw::c_void {
+) -> *mut core::ffi::c_void {
     unsafe { wamr_c::wasm_runtime_get_user_data(exec_env) }
 }
 
 pub fn wasm_runtime_set_user_data(
     exec_env: *mut wamr_c::WASMExecEnv,
-    user_data: *mut ::std::os::raw::c_void,
+    user_data: *mut core::ffi::c_void,
 ) {
     unsafe {
         wamr_c::wasm_runtime_set_user_data(exec_env, user_data);

@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-sha2 = "0.10"
+sha2 = { version = "0.10", default-features = false }
+spin = { version = "0.9", default-features = false, features = ["spin_mutex"] }
 wamr_runtime = { version = "0.1.0", path = "../wamr_runtime" }
 
 [dev-dependencies]

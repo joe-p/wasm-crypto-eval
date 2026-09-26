@@ -60,6 +60,7 @@ fn main() {
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .derive_default(true)
         .trust_clang_mangling(false)
+        .use_core()
         .layout_tests(false)
         .generate_comments(true)
         .generate()

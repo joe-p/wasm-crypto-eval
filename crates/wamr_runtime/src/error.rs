@@ -1,3 +1,4 @@
+use alloc::string::String;
 use snafu::Snafu;
 
 /// Errors produced by the WAMR runtime wrapper.
