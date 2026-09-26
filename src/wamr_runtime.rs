@@ -43,6 +43,8 @@ extern "C" fn host_free(exec_env: *mut c_void, ptr: u64) {
 pub enum WamrType {
     I64,
     I32,
+    F32,
+    F64,
     ByteSlice,
     MutByteSlice,
 }
@@ -52,6 +54,8 @@ impl Display for WamrType {
         match self {
             WamrType::I64 => write!(f, "I"),
             WamrType::I32 => write!(f, "i"),
+            WamrType::F32 => write!(f, "f"),
+            WamrType::F64 => write!(f, "F"),
             WamrType::ByteSlice => write!(f, "*~"),
             WamrType::MutByteSlice => write!(f, "*~"),
         }
