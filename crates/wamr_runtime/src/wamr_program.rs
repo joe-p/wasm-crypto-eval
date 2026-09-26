@@ -1,9 +1,13 @@
 use crate::ERROR_BUFFER_SIZE;
+use crate::error::{
+    AotLengthTooLargeSnafu, AppHeapSizeTooLargeSnafu, CallWasmSnafu, CreateExecEnvSnafu,
+    ErrorBufferSizeTooLargeSnafu, ErrorBufferTooSmallSnafu, InstantiateModuleSnafu, LoadModuleSnafu,
+    MissingProgramFunctionSnafu, Result, WasmValueKindTooLargeSnafu,
+};
 use crate::runtime::{self, UserData};
 use crate::wamr_sys;
 use crate::wamr_sys::wamr_c;
-use color_eyre::eyre::Result;
-use color_eyre::eyre::{ensure, eyre};
+use snafu::ensure;
 use std::any::Any;
 use std::convert::TryFrom;
 use std::ffi::c_char;
@@ -56,16 +60,18 @@ impl Program {
 
         ensure!(
             error_buf.len() >= ERROR_BUFFER_SIZE,
-            "Error buffer must be at least {ERROR_BUFFER_SIZE} bytes"
+            ErrorBufferTooSmallSnafu {
+                size: ERROR_BUFFER_SIZE
+            }
         );
         error_buf.fill(0);
 
-        let prog_len =
-            u32::try_from(program_bytes.len()).map_err(|_| eyre!("AOT length exceeds u32::MAX"))?;
-        let error_buf_size = u32::try_from(ERROR_BUFFER_SIZE)
-            .map_err(|_| eyre!("ERROR_BUFFER_SIZE exceeds u32::MAX"))?;
+        let prog_len = u32::try_from(program_bytes.len())
+            .map_err(|_| AotLengthTooLargeSnafu.build())?;
+        let error_buf_size =
+            u32::try_from(ERROR_BUFFER_SIZE).map_err(|_| ErrorBufferSizeTooLargeSnafu.build())?;
         let app_heap_size =
-            u32::try_from(*app_heap_size).map_err(|_| eyre!("App heap size exceeds u32::MAX"))?;
+            u32::try_from(*app_heap_size).map_err(|_| AppHeapSizeTooLargeSnafu.build())?;
 
         let module = wamr_sys::wasm_runtime_load(
             program_bytes.as_mut_ptr(),
@@ -78,7 +84,7 @@ impl Program {
             let err_msg = unsafe { std::ffi::CStr::from_ptr(error_buf.as_ptr()) }
                 .to_string_lossy()
                 .into_owned();
-            return Err(eyre!("Failed to load WASM module: {}", err_msg));
+            return LoadModuleSnafu { message: err_msg }.fail();
         }
 
         let export_count = wamr_sys::wasm_runtime_get_export_count(module);
@@ -116,14 +122,14 @@ impl Program {
             let err_msg = unsafe { std::ffi::CStr::from_ptr(error_buf.as_ptr()) }
                 .to_string_lossy()
                 .into_owned();
-            return Err(eyre!("Failed to instantiate WASM module: {}", err_msg));
+            return InstantiateModuleSnafu { message: err_msg }.fail();
         }
 
         let exec_env = wamr_sys::wasm_runtime_create_exec_env(instance, *stack_size);
         if exec_env.is_null() {
             wamr_sys::wasm_runtime_deinstantiate(instance);
             wamr_sys::wasm_runtime_unload(module);
-            return Err(eyre!("Failed to create execution environment"));
+            return CreateExecEnvSnafu.fail();
         }
 
         unsafe {
@@ -136,7 +142,7 @@ impl Program {
             wamr_sys::wasm_runtime_destroy_exec_env(exec_env);
             wamr_sys::wasm_runtime_deinstantiate(instance);
             wamr_sys::wasm_runtime_unload(module);
-            return Err(eyre!("Failed to find 'program' function"));
+            return MissingProgramFunctionSnafu.fail();
         }
 
         let program = Program {
@@ -159,7 +165,7 @@ impl Program {
 
     pub fn call(&self) -> Result<u64> {
         let kind = u8::try_from(wamr_c::wasm_valkind_enum_WASM_I64)
-            .map_err(|_| eyre!("WASM value kind does not fit in u8"))?;
+            .map_err(|_| WasmValueKindTooLargeSnafu.build())?;
         let mut results = [wamr_c::wasm_val_t {
             kind,
             of: wamr_c::wasm_val_t__bindgen_ty_1 { i64_: 0 },
@@ -183,7 +189,7 @@ impl Program {
                     .into_owned()
             };
 
-            return Err(eyre!("WASM function call failed: {}", msg));
+            return CallWasmSnafu { message: msg }.fail();
         }
 
         Ok(wamr_sys::wasm_val_t_get_i64(&results[0]) as u64)

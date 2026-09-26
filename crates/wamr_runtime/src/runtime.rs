@@ -1,5 +1,8 @@
+use crate::error::{
+    HostFunctionNameContainsNullSnafu, HostFunctionSignatureContainsNullSnafu, RegisterNativesSnafu,
+    Result, RuntimeAlreadyInitializedSnafu, RuntimeInitSnafu,
+};
 use crate::wamr_sys::{self, wamr_c};
-use color_eyre::eyre::{Context, Result, eyre};
 use std::any::Any;
 use std::ffi::c_void;
 use std::fmt::Display;
@@ -158,14 +161,17 @@ impl WamrRuntime {
             Vec::with_capacity(host_functions.len() + 1);
 
         for host_fn in &host_functions {
-            let name = std::ffi::CString::new(host_fn.name.clone()).wrap_err_with(|| {
-                format!("Host function name contains null byte: {}", host_fn.name)
+            let name = std::ffi::CString::new(host_fn.name.clone()).map_err(|_| {
+                HostFunctionNameContainsNullSnafu {
+                    name: host_fn.name.clone(),
+                }
+                .build()
             })?;
-            let signature = std::ffi::CString::new(host_fn.signature()).wrap_err_with(|| {
-                format!(
-                    "Host function signature contains null byte: {}",
-                    host_fn.name
-                )
+            let signature = std::ffi::CString::new(host_fn.signature()).map_err(|_| {
+                HostFunctionSignatureContainsNullSnafu {
+                    name: host_fn.name.clone(),
+                }
+                .build()
             })?;
 
             c_strings.push(name);
@@ -200,9 +206,7 @@ impl WamrRuntime {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
         {
-            return Err(eyre!(
-                "WAMR runtime already initialized; only one WamrRuntime instance is allowed"
-            ));
+            return RuntimeAlreadyInitializedSnafu.fail();
         }
 
         let runtime = WamrRuntime {
@@ -224,7 +228,7 @@ impl WamrRuntime {
         };
 
         if !wamr_sys::wasm_runtime_full_init(&mut init_args as *mut wamr_c::RuntimeInitArgs) {
-            return Err(eyre!("Failed to initialize WAMR runtime"));
+            return RuntimeInitSnafu.fail();
         }
 
         if !wamr_sys::wasm_runtime_register_natives(
@@ -232,7 +236,7 @@ impl WamrRuntime {
             runtime.native_symbols.as_ptr() as *mut wamr_c::NativeSymbol,
             runtime.native_symbols.len() as u32,
         ) {
-            return Err(eyre!("Failed to register native symbols"));
+            return RegisterNativesSnafu.fail();
         }
 
         Ok(runtime)

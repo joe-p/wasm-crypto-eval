@@ -1,9 +1,11 @@
 extern crate self as wamr_runtime;
 
+pub mod error;
 pub mod runtime;
 pub mod wamr_program;
 pub mod wamr_sys;
 
+pub use error::{Error, Result};
 pub use wamr_runtime_macros::wamr_host_function;
 
 pub const ERROR_BUFFER_SIZE: usize = 128;
